@@ -28,7 +28,6 @@ jobs:
           const { graphql } = require("@octokit/graphql");
           const axios = require("axios");
 
-          // 環境変数から設定を取得
           const GITHUB_USERNAME = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
           const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
           const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -36,7 +35,6 @@ jobs:
 
           console.log(`Checking contributions for: ${GITHUB_USERNAME}`);
 
-          // GitHubコントリビューション確認
           async function checkGitHubContributions() {
             try {
               const today = new Date().toISOString().split("T")[0];
@@ -88,7 +86,6 @@ jobs:
             }
           }
 
-          // LINE Messaging APIを使用してリッチメッセージを送信
           async function sendRichMessage(userId, contributionInfo) {
             const { date, contributionCount } = contributionInfo;
             
@@ -207,7 +204,6 @@ jobs:
             }
           }
 
-          // メイン処理
           async function main() {
             try {
               const contribution = await checkGitHubContributions();
@@ -220,8 +216,7 @@ jobs:
                 console.log('Notification sent successfully!');
               } else {
                 console.log(`${contribution.contributionCount} contributions found today. No notification needed.`);
-                // コメントを外すと、毎日の状況を通知します
-                // await sendRichMessage(LINE_USER_ID, contribution);
+                await sendRichMessage(LINE_USER_ID, contribution);
               }
             } catch (error) {
               console.error('Error occurred:', error);
@@ -234,7 +229,7 @@ jobs:
 
       - name: Run contribution checker
         env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
