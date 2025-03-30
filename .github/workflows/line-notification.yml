@@ -1,0 +1,243 @@
+name: GitHub Contribution Checker
+
+on:
+  schedule:
+    # 日本時間22時に実行（UTCで13時）
+    - cron: '0 13 * * *'
+  
+  # 手動実行用（テスト時に便利）
+  workflow_dispatch:
+
+jobs:
+  check-contributions:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: npm install @octokit/graphql axios
+      
+      - name: Create contribution checker script
+        run: |
+          cat > check.js << 'EOF'
+          const { graphql } = require("@octokit/graphql");
+          const axios = require("axios");
+          
+          // 環境変数から設定を取得
+          const GITHUB_USERNAME = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
+          const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+          const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+          const LINE_USER_ID = process.env.LINE_USER_ID;
+          
+          console.log(`Checking contributions for: ${GITHUB_USERNAME}`);
+          
+          // GitHubコントリビューション確認
+          async function checkGitHubContributions() {
+            try {
+              const today = new Date().toISOString().split("T")[0];
+              
+              const graphqlWithAuth = graphql.defaults({
+                headers: {
+                  authorization: `token ${GITHUB_TOKEN}`,
+                },
+              });
+              
+              const query = `
+                query {
+                  user(login: "${GITHUB_USERNAME}") {
+                    contributionsCollection {
+                      contributionCalendar {
+                        weeks {
+                          contributionDays {
+                            date
+                            contributionCount
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+              
+              const response = await graphqlWithAuth(query);
+              
+              let todayContribution = 0;
+              const weeks = response.user.contributionsCollection.contributionCalendar.weeks;
+              
+              for (const week of weeks) {
+                for (const day of week.contributionDays) {
+                  if (day.date === today) {
+                    todayContribution = day.contributionCount;
+                    break;
+                  }
+                }
+              }
+              
+              return {
+                date: today,
+                contributionCount: todayContribution
+              };
+            } catch (error) {
+              console.error('GitHub contribution fetch error:', error);
+              throw error;
+            }
+          }
+          
+          // LINE Messaging APIを使用してリッチメッセージを送信
+          async function sendRichMessage(userId, contributionInfo) {
+            const { date, contributionCount } = contributionInfo;
+            
+            const hasContribution = contributionCount > 0;
+            const statusColor = hasContribution ? '#27AE60' : '#E74C3C';
+            const statusMessage = hasContribution 
+              ? `今日は${contributionCount}件のコントリビューションがあります！` 
+              : 'まだコントリビューションがありません！';
+            const actionText = hasContribution ? 'GitHubを開く' : 'コミットする';
+            
+            try {
+              console.log(`Sending LINE message to user ID: ${userId}`);
+              const response = await axios({
+                method: 'post',
+                url: 'https://api.line.me/v2/bot/message/push',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
+                },
+                data: JSON.stringify({
+                  to: userId,
+                  messages: [
+                    {
+                      type: 'flex',
+                      altText: `GitHub草チェック: ${date}`,
+                      contents: {
+                        type: 'bubble',
+                        header: {
+                          type: 'box',
+                          layout: 'vertical',
+                          contents: [
+                            {
+                              type: 'text',
+                              text: 'GitHub草チェック',
+                              weight: 'bold',
+                              size: 'xl',
+                              color: '#FFFFFF'
+                            }
+                          ],
+                          backgroundColor: '#4A4A4A',
+                          paddingAll: '15px'
+                        },
+                        body: {
+                          type: 'box',
+                          layout: 'vertical',
+                          contents: [
+                            {
+                              type: 'text',
+                              text: date,
+                              weight: 'bold',
+                              size: 'lg',
+                              margin: 'md'
+                            },
+                            {
+                              type: 'box',
+                              layout: 'vertical',
+                              margin: 'lg',
+                              spacing: 'sm',
+                              contents: [
+                                {
+                                  type: 'box',
+                                  layout: 'baseline',
+                                  spacing: 'md',
+                                  contents: [
+                                    {
+                                      type: 'text',
+                                      text: 'ステータス:',
+                                      color: '#aaaaaa',
+                                      size: 'sm',
+                                      flex: 2
+                                    },
+                                    {
+                                      type: 'text',
+                                      text: statusMessage,
+                                      wrap: true,
+                                      color: statusColor,
+                                      size: 'sm',
+                                      flex: 5,
+                                      weight: 'bold'
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        footer: {
+                          type: 'box',
+                          layout: 'vertical',
+                          spacing: 'sm',
+                          contents: [
+                            {
+                              type: 'button',
+                              style: 'primary',
+                              action: {
+                                type: 'uri',
+                                label: actionText,
+                                uri: `https://github.com/${GITHUB_USERNAME}`
+                              },
+                              color: statusColor
+                            }
+                          ],
+                          flex: 0,
+                          paddingAll: '15px'
+                        }
+                      }
+                    }
+                  ]
+                })
+              });
+              
+              console.log('LINE rich message sent successfully:', response.status);
+            } catch (error) {
+              console.error('LINE message error:', error.response ? error.response.data : error.message);
+              throw error;
+            }
+          }
+          
+          // メイン処理
+          async function main() {
+            try {
+              const contribution = await checkGitHubContributions();
+              
+              console.log(`Date: ${contribution.date}, Contributions: ${contribution.contributionCount}`);
+              
+              if (contribution.contributionCount === 0) {
+                console.log('No contributions today. Sending notification...');
+                await sendRichMessage(LINE_USER_ID, contribution);
+                console.log('Notification sent successfully!');
+              } else {
+                console.log(`${contribution.contributionCount} contributions found today. No notification needed.`);
+                // コメントを外すと、毎日の状況を通知します
+                // await sendRichMessage(LINE_USER_ID, contribution);
+              }
+            } catch (error) {
+              console.error('Error occurred:', error);
+              process.exit(1);
+            }
+          }
+          
+          main();
+          EOF
+      
+      - name: Run contribution checker
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GITHUB_USERNAME: ${{ github.repository_owner }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: node check.js
