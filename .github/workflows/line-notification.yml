@@ -2,42 +2,40 @@ name: GitHub Contribution Checker
 
 on:
   schedule:
-    # 日本時間22時に実行（UTCで13時）
-    - cron: '0 13 * * *'
-  
-  # 手動実行用（テスト時に便利）
+    - cron: "0 13 * * *"
+
   workflow_dispatch:
 
 jobs:
   check-contributions:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
-      
+          node-version: "18"
+
       - name: Install dependencies
         run: npm install @octokit/graphql axios
-      
+
       - name: Create contribution checker script
         run: |
           cat > check.js << 'EOF'
           const { graphql } = require("@octokit/graphql");
           const axios = require("axios");
-          
+
           // 環境変数から設定を取得
           const GITHUB_USERNAME = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
           const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
           const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
           const LINE_USER_ID = process.env.LINE_USER_ID;
-          
+
           console.log(`Checking contributions for: ${GITHUB_USERNAME}`);
-          
+
           // GitHubコントリビューション確認
           async function checkGitHubContributions() {
             try {
@@ -89,7 +87,7 @@ jobs:
               throw error;
             }
           }
-          
+
           // LINE Messaging APIを使用してリッチメッセージを送信
           async function sendRichMessage(userId, contributionInfo) {
             const { date, contributionCount } = contributionInfo;
@@ -208,7 +206,7 @@ jobs:
               throw error;
             }
           }
-          
+
           // メイン処理
           async function main() {
             try {
@@ -230,10 +228,10 @@ jobs:
               process.exit(1);
             }
           }
-          
+
           main();
           EOF
-      
+
       - name: Run contribution checker
         env:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
